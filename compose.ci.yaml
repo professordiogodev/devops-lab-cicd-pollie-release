@@ -1,0 +1,25 @@
+# Provided. The whole stack from a published image, for the staging smoke test.
+# Usage:  IMAGE=ghcr.io/you/repo:1.0.0 docker compose -f compose.ci.yaml up -d --wait
+services:
+  db:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: pollie, POSTGRES_PASSWORD: ci-only, POSTGRES_DB: pollie}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U pollie"], interval: 3s, timeout: 3s, retries: 20}
+  redis:
+    image: redis:7-alpine
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20}
+  api:
+    image: ${IMAGE:?set IMAGE to the image to test}
+    environment: &env
+      DATABASE_URL: postgresql://pollie:ci-only@db:5432/pollie
+      REDIS_URL: redis://redis:6379
+    ports: ["8000:8000"]
+    depends_on: {db: {condition: service_healthy}, redis: {condition: service_healthy}}
+    healthcheck: {test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=2)"], interval: 3s, timeout: 3s, retries: 20}
+  worker:
+    image: ${IMAGE}
+    command: ["python", "-m", "pollie.worker"]
+    # the image's HEALTHCHECK probes the API port; the worker listens on 9100
+    healthcheck: {test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9100/healthz',timeout=2)"], interval: 3s, timeout: 3s, retries: 20}
+    environment: *env
+    depends_on: {db: {condition: service_healthy}, redis: {condition: service_healthy}}

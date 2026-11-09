@@ -1,0 +1,56 @@
+# Provided. Lint and test, reusable: release.yml calls it with `uses: ./.github/workflows/ci.yml`.
+name: CI
+
+on:
+  pull_request:
+  workflow_call:   # the release workflow calls this one
+
+# Least privilege by default. Jobs that need more ask for it themselves.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pollie
+          POSTGRES_PASSWORD: devpass
+          POSTGRES_DB: pollie
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pollie" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://pollie:devpass@localhost:5432/pollie
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Unit tests (coverage gate)
+        run: make test
+      - name: Integration tests (real PostgreSQL and Redis)
+        run: make test-integration
