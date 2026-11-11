@@ -22,13 +22,30 @@
 
 ## 🎬 The situation
 
-<p align="center"><img src="assets/gifs/situation.gif" width="300" alt=""></p>
+<p align="center"><img src="assets/gifs/situation.gif" width="300" alt="A change moves through commit, test, build and release; when the tests fail nothing is released, when they pass the release goes out"></p>
 
-Yesterday your pipeline stopped bad changes from reaching `main`. Today the product owner asks a different question: *"Which version is in production right now, what is inside it, and can we go back to the previous one in five minutes if it breaks?"*
+The incident is already over, and the report is already written. Nobody wants a second one.
 
-Nobody can answer. "Latest" is not a version, nobody knows which libraries ship in the image, and "going back" means rebuilding from an old commit and hoping.
+```text
+POSTMORTEM - "Which version is in production?"            status: draft, action items open
+Impact     : 52 minutes of wrong totals shown to customers
+Detected   : by a customer, not by us
+Root cause : a release was "whatever was on main, built on someone's laptop"
 
-A **release** is a promise: this exact, tested, scanned artifact has a name (`v1.2.3`), a list of ingredients and a written history, and the same artifact that passed staging is the one that reaches production. You will build the pipeline that makes that promise.
+Timeline
+  14:05  a change is deployed by hand
+  14:31  a customer reports wrong totals
+  14:40  the team asks: which version is running?  Nobody knows. The image tag is "latest".
+  15:12  rolled back by rebuilding an old commit and hoping
+
+Action items (owner: you)
+  AI-1  A release starts from a version tag and from nothing else
+  AI-2  Every release has a versioned image, a scan and a bill of materials
+  AI-3  The artifact is tested before production, not just the code
+  AI-4  Going back takes five minutes and rebuilds nothing
+```
+
+A **release** is a promise: this exact, tested, scanned artifact has a name (`v1.2.3`), a list of ingredients and a written history, and the same artifact that passed staging is the one that reaches production. Your job is to build the pipeline that keeps that promise, so that the next postmortem is boring. The work has two acts: **Act 1** builds the pipeline and ships two releases, **Act 2** is the next incident, and you roll back.
 
 > [!IMPORTANT]
 > **Your mission**
@@ -42,7 +59,9 @@ A **release** is a promise: this exact, tested, scanned artifact has a name (`v1
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 0 - Set the scene
+## Act 1 - Build the pipeline
+
+### Part 0 - Set the scene
 
 1. **Fork** this repository (keep it **public**), enable Actions in your fork (Actions tab, *I understand my workflows, go ahead and enable them*) and clone it.
 2. Log in and add the package permissions (needed by the checks and the tear down):
@@ -63,7 +82,7 @@ gh auth refresh -s read:packages,delete:packages
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 1 - The trigger and the reuse
+### Part 1 (AI-1) - The trigger and the reuse
 
 Create `.github/workflows/release.yml`:
 
@@ -76,7 +95,7 @@ Create `.github/workflows/release.yml`:
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 2 - The `image` job: build, scan, bill of materials, publish
+### Part 2 (AI-2) - The `image` job: build, scan, bill of materials, publish
 
 Add a job `image` (`needs: ci`) with `permissions: contents: read` and `packages: write` (**job level**, never at the top). It must:
 
@@ -94,7 +113,7 @@ Add a job `image` (`needs: ci`) with `permissions: contents: read` and `packages
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 3 - The Release
+### Part 3 (AI-2) - The Release
 
 Add a job `release` (`needs: image`) with `permissions: contents: write` (**the only job that can write to the repository**). It downloads the SBOM artifact and creates the GitHub Release:
 
@@ -106,7 +125,7 @@ gh release create "$GITHUB_REF_NAME" sbom.cdx.json --repo "$GITHUB_REPOSITORY" -
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 4 - Staging: test the artifact, not the code
+### Part 4 (AI-3) - Staging: test the artifact, not the code
 
 Add a job `staging` (`needs: release`) in the environment `staging` (`environment: staging`) that:
 
@@ -126,7 +145,9 @@ In your fork: **Settings → Environments → production**, add yourself as **Re
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 5 - First release
+### Part 5 - First release
+
+<p align="center"><img src="assets/gifs/recon.gif" width="300" alt="A list of commits with one highlighted at a time, like the tags and releases you are about to create"></p>
 
 ```bash
 git switch -c release-pipeline
@@ -147,13 +168,17 @@ If something fails, fix the workflow and push a **new** tag (`v1.0.1`). Do not m
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 6 - A second release
+### Part 6 - A second release
 
 Change something visible (for example a line in `CHANGELOG.md` or a comment in the API), merge it through a pull request, and tag `v1.1.0`. The new release notes now list that pull request.
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 7 - Roll back
+## Act 2 - The next incident
+
+Two weeks later. Version `1.1.0` is live in staging and a customer says something is wrong. This is the moment the pipeline was built for.
+
+### Part 7 (AI-4) - Roll back
 
 Version `1.1.0` is in staging. A customer reports a problem. In the **Actions** tab (or `gh workflow run release.yml -f version=1.0.0`), run the release workflow **manually** with `version=1.0.0`.
 
@@ -164,9 +189,9 @@ Only `staging` runs: it pulls `1.0.0`, brings the stack up and smoke tests it. N
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## Part 8 - Prove it
+### Part 8 - Prove it: close the action items
 
-<p align="center"><img src="assets/gifs/verify.gif" width="300" alt=""></p>
+<p align="center"><img src="assets/gifs/verify.gif" width="300" alt="A terminal running verify.sh and printing PASS lines"></p>
 
 ```bash
 ./verify.sh
@@ -189,7 +214,7 @@ It checks the workflow file, then what GitHub recorded: a green release run from
 <!-- teardown:start (generated by labs.py, do not edit) -->
 ## Tear down (mandatory)
 
-<p align="center"><img src="assets/gifs/teardown.gif" width="300" alt=""></p>
+<p align="center"><img src="assets/gifs/teardown.gif" width="300" alt="A terminal running verify-teardown.sh and printing TEARDOWN VERIFIED"></p>
 
 Resources left behind cost money, keep doors open and pollute the next lab. Removing what you created is part of the job, so it is part of the submission: **you must prove it is gone**.
 
